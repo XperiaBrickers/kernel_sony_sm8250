@@ -820,7 +820,7 @@ restart_now:
 		goto err_out;
 
 	/* preload all compressed pages (maybe downgrade role if necessary) */
-	if (should_alloc_managed_pages(fe, sbi->cache_strategy, map->m_la))
+	if (should_alloc_managed_pages(fe, sbi->ctx.cache_strategy, map->m_la))
 		cache_strategy = TRYALLOC;
 	else
 		cache_strategy = DONTALLOC;

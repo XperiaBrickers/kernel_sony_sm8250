@@ -53,6 +53,16 @@ struct erofs_sb_lz4_info {
 	u16 max_distance_pages;
 	/* maximum possible blocks for pclusters in the filesystem */
 	u16 max_pclusterblks;
+
+struct erofs_fs_context {
+#ifdef CONFIG_EROFS_FS_ZIP
+	/* current strategy of how to use managed cache */
+	unsigned char cache_strategy;
+
+	/* threshold for decompression synchronously */
+	unsigned int max_sync_decompress_pages;
+#endif
+	unsigned int mount_opt;
 };
 
 struct erofs_sb_info {
@@ -67,14 +77,8 @@ struct erofs_sb_info {
 	/* strategy of sync decompression (false - auto, true - force on) */
 	bool readahead_sync_decompress;
 
-	/* threshold for decompression synchronously */
-	unsigned int max_sync_decompress_pages;
-
 	unsigned int shrinker_run_no;
 	u16 available_compr_algs;
-
-	/* current strategy of how to use managed cache */
-	unsigned char cache_strategy;
 
 	/* pseudo inode to manage cached pages */
 	struct inode *managed_cache;
@@ -109,6 +113,8 @@ struct erofs_sb_info {
 	/* sysfs support */
 	struct kobject s_kobj;		/* /sys/fs/erofs/<devname> */
 	struct completion s_kobj_unregister;
+
+	struct erofs_fs_context ctx;	/* options */
 };
 
 #define EROFS_SB(sb) ((struct erofs_sb_info *)(sb)->s_fs_info)
@@ -118,17 +124,17 @@ struct erofs_sb_info {
 #define EROFS_MOUNT_XATTR_USER		0x00000010
 #define EROFS_MOUNT_POSIX_ACL		0x00000020
 
-#define clear_opt(sbi, option)	((sbi)->mount_opt &= ~EROFS_MOUNT_##option)
-#define set_opt(sbi, option)	((sbi)->mount_opt |= EROFS_MOUNT_##option)
-#define test_opt(sbi, option)	((sbi)->mount_opt & EROFS_MOUNT_##option)
+#define clear_opt(ctx, option)	((ctx)->mount_opt &= ~EROFS_MOUNT_##option)
+#define set_opt(ctx, option)	((ctx)->mount_opt |= EROFS_MOUNT_##option)
+#define test_opt(ctx, option)	((ctx)->mount_opt & EROFS_MOUNT_##option)
 
-#ifdef CONFIG_EROFS_FS_ZIP
 enum {
 	EROFS_ZIP_CACHE_DISABLED,
 	EROFS_ZIP_CACHE_READAHEAD,
 	EROFS_ZIP_CACHE_READAROUND
 };
 
+#ifdef CONFIG_EROFS_FS_ZIP
 #define EROFS_LOCKED_MAGIC     (INT_MIN | 0xE0F510CCL)
 
 /* basic unit of the workstation of a super_block */
