@@ -6,7 +6,6 @@
  */
 #include "internal.h"
 #include <linux/prefetch.h>
-
 #include <trace/events/erofs.h>
 
 static void erofs_readendio(struct bio *bio)
@@ -312,6 +311,20 @@ has_updated:
 submit_bio_out:
 		submit_bio(bio);
 	return err ? ERR_PTR(err) : NULL;
+}
+
+int erofs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		 u64 start, u64 len)
+{
+	if (erofs_inode_is_data_compressed(EROFS_I(inode)->datalayout)) {
+#ifdef CONFIG_EROFS_FS_ZIP
+		return iomap_fiemap(inode, fieinfo, start, len,
+				    &z_erofs_iomap_report_ops);
+#else
+		return -EOPNOTSUPP;
+#endif
+	}
+	return iomap_fiemap(inode, fieinfo, start, len, &erofs_iomap_ops);
 }
 
 /*
