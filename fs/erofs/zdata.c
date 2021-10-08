@@ -1531,6 +1531,72 @@ static void z_erofs_runqueue(struct super_block *sb,
 	z_erofs_decompress_queue(&io[JQ_SUBMIT], pagepool);
 }
 
+/*
+ * Since partial uptodate is still unimplemented for now, we have to use
+ * approximate readmore strategies as a start.
+ */
+static void z_erofs_pcluster_readmore(struct z_erofs_decompress_frontend *f,
+				      struct readahead_control *rac,
+				      erofs_off_t end,
+				      struct list_head *pagepool,
+				      bool backmost)
+{
+	struct inode *inode = f->inode;
+	struct erofs_map_blocks *map = &f->map;
+	erofs_off_t cur;
+	int err;
+
+	if (backmost) {
+		map->m_la = end;
+		/* TODO: pass in EROFS_GET_BLOCKS_READMORE for LZMA later */
+		err = z_erofs_map_blocks_iter(inode, map, 0);
+		if (err)
+			return;
+
+		/* expend ra for the trailing edge if readahead */
+		if (rac) {
+			loff_t newstart = readahead_pos(rac);
+
+			cur = round_up(map->m_la + map->m_llen, PAGE_SIZE);
+			readahead_expand(rac, newstart, cur - newstart);
+			return;
+		}
+		end = round_up(end, PAGE_SIZE);
+	} else {
+		end = round_up(map->m_la, PAGE_SIZE);
+
+		if (!map->m_llen)
+			return;
+	}
+
+	cur = map->m_la + map->m_llen - 1;
+	while (cur >= end) {
+		pgoff_t index = cur >> PAGE_SHIFT;
+		struct page *page;
+
+		page = erofs_grab_cache_page_nowait(inode->i_mapping, index);
+		if (!page)
+			goto skip;
+
+		if (PageUptodate(page)) {
+			unlock_page(page);
+			put_page(page);
+			goto skip;
+		}
+
+		err = z_erofs_do_read_page(f, page, pagepool);
+		if (err)
+			erofs_err(inode->i_sb,
+				  "readmore error at page %lu @ nid %llu",
+				  index, EROFS_I(inode)->nid);
+		put_page(page);
+skip:
+		if (cur < PAGE_SIZE)
+			break;
+		cur = (index << PAGE_SHIFT) - 1;
+	}
+}
+
 static int z_erofs_readpage(struct file *file, struct page *page)
 {
 	struct inode *const inode = page->mapping->host;
@@ -1539,10 +1605,13 @@ static int z_erofs_readpage(struct file *file, struct page *page)
 	LIST_HEAD(pagepool);
 
 	trace_erofs_readpage(page, false);
-
 	f.headoffset = (erofs_off_t)page->index << PAGE_SHIFT;
 
+	z_erofs_pcluster_readmore(&f, NULL, f.headoffset + PAGE_SIZE - 1,
+				  &pagepool, true);
 	err = z_erofs_do_read_page(&f, page, &pagepool);
+	z_erofs_pcluster_readmore(&f, NULL, 0, &pagepool, false);
+
 	(void)z_erofs_collector_end(&f.clt);
 
 	/* if some compressed cluster ready, need submit them anyway */
@@ -1613,11 +1682,12 @@ static int z_erofs_readpages(struct file *filp, struct address_space *mapping,
 				  page->index, EROFS_I(inode)->nid);
 		put_page(page);
 	}
-
+	z_erofs_pcluster_readmore(&f, rac, 0, &pagepool, false);
 	(void)z_erofs_collector_end(&f.clt);
 
-	z_erofs_runqueue(inode->i_sb, &f, &pagepool, sync);
-
+	z_erofs_runqueue(inode->i_sb, &f, &pagepool,
+			 sbi->opt.readahead_sync_decompress &&
+			 nr_pages <= sbi->opt.max_sync_decompress_pages);
 	if (f.map.mpage)
 		put_page(f.map.mpage);
 
