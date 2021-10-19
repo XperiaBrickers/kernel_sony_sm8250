@@ -27,16 +27,9 @@
 #define dmb(x) __asm__ __volatile__ ("" : : : "memory")
 #endif
 
-#if __LINUX_ARM_ARCH__ >= 8
 #define aarch32_smp_mb()	dmb(ish)
 #define aarch32_smp_rmb()	dmb(ishld)
 #define aarch32_smp_wmb()	dmb(ishst)
-#else
-#define aarch32_smp_mb()	dmb(ish)
-#define aarch32_smp_rmb()	aarch32_smp_mb()
-#define aarch32_smp_wmb()	dmb(ishst)
-#endif
-
 
 #undef smp_mb
 #undef smp_rmb
