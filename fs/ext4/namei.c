@@ -1577,7 +1577,6 @@ static struct buffer_head *__ext4_find_entry(struct inode *dir,
 			if (inlined)
 				*inlined = 1;
 			goto cleanup_and_exit;
-		}
 	}
 
 	if ((namelen <= 2) && (name[0] == '.') &&
