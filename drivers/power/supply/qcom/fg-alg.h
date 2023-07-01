@@ -72,7 +72,6 @@ struct cap_learning {
 	int			learning_trial_counter;
 	int			learning_counter;
 #endif
-	bool			cl_skip;
 	struct mutex		lock;
 	struct cl_params	dt;
 	bool (*ok_to_begin)(void *data);

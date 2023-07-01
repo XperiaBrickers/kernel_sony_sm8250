@@ -732,6 +732,7 @@ static const struct midr_range arm64_workaround_845719_cpus[] = {
 	MIDR_RANGE(MIDR_KRYO2XX_SILVER, 0xA, 0x4, 0xA, 0x4),
 	{},
 };
+
 #endif
 
 #ifdef CONFIG_ARM64_ERRATUM_1742098

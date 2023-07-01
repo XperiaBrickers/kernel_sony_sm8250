@@ -15,7 +15,9 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/seq_file.h>
+#ifndef __GENKSYMS__
 #include <linux/mm.h>
+#endif
 
 #include "sysfs.h"
 #include "../kernfs/kernfs-internal.h"
@@ -599,7 +601,7 @@ int sysfs_emit_at(char *buf, int at, const char *fmt, ...)
 	va_list args;
 	int len;
 
-	if (WARN(!buf || at < 0 || at >= PAGE_SIZE,
+	if (WARN(!buf || offset_in_page(buf) || at < 0 || at >= PAGE_SIZE,
 		 "invalid sysfs_emit_at: buf:%p at:%d\n", buf, at))
 		return 0;
 

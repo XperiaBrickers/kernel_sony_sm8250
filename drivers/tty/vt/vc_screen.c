@@ -278,8 +278,10 @@ vcs_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 		 */
 		size = vcs_size(inode);
 		if (size < 0) {
+			if (read)
+				break;
 			ret = size;
-			break;
+			goto unlock_out;
 		}
 		if (pos >= size)
 			break;

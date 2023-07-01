@@ -4,14 +4,12 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/hw_random.h>
+#include <linux/random.h>
 #include <linux/io.h>
 
 #include <soc/qcom/scm.h>
 
 #include <asm/cacheflush.h>
-
-#include <linux/random.h>
 
 #define TZ_SVC_CRYPTO	10
 #define PRNG_CMD_ID	0x01
