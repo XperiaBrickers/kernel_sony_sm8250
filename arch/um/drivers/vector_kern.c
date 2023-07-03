@@ -741,7 +741,6 @@ static int vector_config(char *str, char **error_out)
 
 	if (parsed == NULL) {
 		*error_out = "vector_config failed to parse parameters";
-		kfree(params);
 		return -EINVAL;
 	}
 

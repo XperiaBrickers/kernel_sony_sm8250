@@ -2607,7 +2607,7 @@ static void ufshcd_init_clk_gating(struct ufs_hba *hba)
 	snprintf(wq_name, ARRAY_SIZE(wq_name), "ufs_clk_gating_%d",
 		 hba->host->host_no);
 	hba->clk_gating.clk_gating_workq = alloc_ordered_workqueue(wq_name,
-							   WQ_MEM_RECLAIM | WQ_HIGHPRI);
+							   WQ_MEM_RECLAIM);
 
 	gating->is_enabled = true;
 
@@ -3084,20 +3084,6 @@ static void ufshcd_clk_scaling_update_busy(struct ufs_hba *hba)
 static inline
 int ufshcd_send_command(struct ufs_hba *hba, unsigned int task_tag)
 {
-	if (hba->lrb[task_tag].cmd) {
-		u8 opcode = (u8)(*hba->lrb[task_tag].cmd->cmnd);
-
-		if (opcode == SECURITY_PROTOCOL_OUT && hba->security_in) {
-			hba->security_in--;
-		} else if (opcode == SECURITY_PROTOCOL_IN) {
-			if (hba->security_in) {
-				WARN_ON(1);
-				return -EINVAL;
-			}
-			hba->security_in++;
-		}
-	}
-
 	hba->lrb[task_tag].issue_time_stamp = ktime_get();
 	hba->lrb[task_tag].compl_time_stamp = ktime_set(0, 0);
 	ufshcd_cond_add_cmd_trace(hba, task_tag,
@@ -3902,13 +3888,7 @@ static int ufshcd_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd)
 		ufshcd_vops_pm_qos_req_end(hba, cmd->request, true);
 		dev_err(hba->dev, "%s: failed sending command, %d\n",
 							__func__, err);
-		if (err == -EINVAL) {
-			set_host_byte(cmd, DID_ERROR);
-			if (has_read_lock)
-				ufshcd_put_read_lock(hba);
-			cmd->scsi_done(cmd);
-			return 0;
-		}
+		err = DID_ERROR;
 		goto out;
 	}
 
@@ -8221,12 +8201,8 @@ static int ufshcd_host_reset_and_restore(struct ufs_hba *hba)
 	ufshcd_set_clk_freq(hba, true);
 
 	err = ufshcd_hba_enable(hba);
-	if (err) {
-		/* ufshcd_probe_hba() will put it */
-		if (!ufshcd_eh_in_progress(hba) && !hba->pm_op_in_progress)
-			pm_runtime_put_sync(hba->dev);
+	if (err)
 		goto out;
-	}
 
 	/* Establish the link again and restore the device */
 	err = ufshcd_probe_hba(hba);
@@ -8278,8 +8254,6 @@ static int ufshcd_reset_and_restore(struct ufs_hba *hba)
 	ufshcd_enable_irq(hba);
 
 	do {
-		if (!ufshcd_eh_in_progress(hba) && !hba->pm_op_in_progress)
-			pm_runtime_get_sync(hba->dev);
 		err = ufshcd_detect_device(hba);
 	} while (err && --retries);
 
@@ -11135,8 +11109,8 @@ int ufshcd_shutdown(struct ufs_hba *hba)
 	/* reqs issued from contexts other than shutdown will fail from now */
 	ufshcd_scsi_unblock_requests(hba);
 	ufshcd_release_all(hba);
-	ret = ufshcd_suspend(hba, UFS_SHUTDOWN_PM);
 
+	ret = ufshcd_suspend(hba, UFS_SHUTDOWN_PM);
 out:
 	if (ret)
 		dev_err(hba->dev, "%s failed, err %d\n", __func__, ret);
@@ -11523,8 +11497,6 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	ufsdbg_add_debugfs(hba);
 
 	ufs_sysfs_add_nodes(hba->dev);
-
-	device_enable_async_suspend(dev);
 
 	return 0;
 

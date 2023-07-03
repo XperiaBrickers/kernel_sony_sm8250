@@ -1323,10 +1323,13 @@ ffs_epfile_release(struct inode *inode, struct file *file)
 {
 	struct ffs_epfile *epfile = inode->i_private;
 	struct ffs_data *ffs = epfile->ffs;
+	unsigned long flags;
 
 	ENTER();
 
+	spin_lock_irqsave(&epfile->ffs->eps_lock, flags);
 	__ffs_epfile_read_buffer_free(epfile);
+	spin_unlock_irqrestore(&epfile->ffs->eps_lock, flags);
 	ffs_log("%s: state %d setup_state %d flag %lu opened %u",
 		epfile->name, epfile->ffs->state, epfile->ffs->setup_state,
 		epfile->ffs->flags, atomic_read(&epfile->opened));
@@ -1400,8 +1403,8 @@ static long ffs_epfile_ioctl(struct file *file, unsigned code,
 		struct usb_endpoint_descriptor desc1, *desc;
 
 		switch (epfile->ffs->gadget->speed) {
-		case USB_SPEED_SUPER_PLUS:
 		case USB_SPEED_SUPER:
+		case USB_SPEED_SUPER_PLUS:
 			desc_idx = 2;
 			break;
 		case USB_SPEED_HIGH:
@@ -1831,9 +1834,11 @@ static void ffs_data_closed(struct ffs_data *ffs)
 			spin_unlock_irqrestore(&ffs->eps_lock,
 							flags);
 
+			mutex_lock(&ffs->mutex);
 			if (epfiles)
 				ffs_epfiles_destroy(epfiles,
 						 ffs->eps_count);
+			mutex_unlock(&ffs->mutex);
 
 			if (ffs->setup_state == FFS_SETUP_PENDING)
 				__ffs_ep0_stall(ffs);
@@ -1919,6 +1924,7 @@ static void ffs_data_clear(struct ffs_data *ffs)
 	 * & ffs_epfile_release therefore maintaining a local
 	 * copy of epfile will save us from use-after-free.
 	 */
+	mutex_lock(&ffs->mutex);
 	if (epfiles) {
 		ffs_epfiles_destroy(epfiles, ffs->eps_count);
 		ffs->epfiles = NULL;
@@ -1930,8 +1936,12 @@ static void ffs_data_clear(struct ffs_data *ffs)
 	}
 
 	kfree(ffs->raw_descs_data);
+	ffs->raw_descs_data = NULL;
 	kfree(ffs->raw_strings);
+	ffs->raw_strings = NULL;
 	kfree(ffs->stringtabs);
+	ffs->stringtabs = NULL;
+	mutex_unlock(&ffs->mutex);
 }
 
 static void ffs_data_reset(struct ffs_data *ffs)
@@ -1943,10 +1953,7 @@ static void ffs_data_reset(struct ffs_data *ffs)
 
 	ffs_data_clear(ffs);
 
-	ffs->raw_descs_data = NULL;
 	ffs->raw_descs = NULL;
-	ffs->raw_strings = NULL;
-	ffs->stringtabs = NULL;
 
 	ffs->raw_descs_length = 0;
 	ffs->fs_descs_count = 0;
@@ -2090,19 +2097,21 @@ static void ffs_epfiles_destroy(struct ffs_epfile *epfiles, unsigned count)
 
 static void ffs_func_eps_disable(struct ffs_function *func)
 {
-	struct ffs_data *ffs      = func->ffs;
+	struct ffs_data *ffs;
 	struct ffs_ep *ep;
 	struct ffs_epfile *epfile;
 	unsigned short count;
 	unsigned long flags;
 
+	spin_lock_irqsave(&func->ffs->eps_lock, flags);
+	ffs = func->ffs;
+	ep = func->eps;
+	epfile = ffs->epfiles;
+	count = ffs->eps_count;
+
 	ffs_log("enter: state %d setup_state %d flag %lu", func->ffs->state,
 		func->ffs->setup_state, func->ffs->flags);
 
-	spin_lock_irqsave(&func->ffs->eps_lock, flags);
-	count = func->ffs->eps_count;
-	epfile = func->ffs->epfiles;
-	ep = func->eps;
 	while (count--) {
 		/* pending requests get nuked */
 		if (likely(ep->ep))
@@ -2128,14 +2137,15 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 	unsigned long flags;
 	int ret = 0;
 
-	ffs_log("enter: state %d setup_state %d flag %lu", func->ffs->state,
-		func->ffs->setup_state, func->ffs->flags);
-
 	spin_lock_irqsave(&func->ffs->eps_lock, flags);
 	ffs = func->ffs;
 	ep = func->eps;
 	epfile = ffs->epfiles;
 	count = ffs->eps_count;
+
+	ffs_log("enter: state %d setup_state %d flag %lu", func->ffs->state,
+		func->ffs->setup_state, func->ffs->flags);
+
 	while(count--) {
 		ep->ep->driver_data = ep;
 
@@ -3237,7 +3247,8 @@ static inline struct f_fs_opts *ffs_do_functionfs_bind(struct usb_function *f,
 	struct ffs_function *func = ffs_func_from_usb(f);
 	struct f_fs_opts *ffs_opts =
 		container_of(f->fi, struct f_fs_opts, func_inst);
-	struct ffs_data *ffs;
+	struct ffs_data *ffs = ffs_opts->dev->ffs_data;
+	struct ffs_data *ffs_data;
 	int ret;
 
 	ENTER();
@@ -3252,13 +3263,13 @@ static inline struct f_fs_opts *ffs_do_functionfs_bind(struct usb_function *f,
 	if (!ffs_opts->no_configfs)
 		ffs_dev_lock();
 	ret = ffs_opts->dev->desc_ready ? 0 : -ENODEV;
-	ffs = ffs_opts->dev->ffs_data;
+	ffs_data = ffs_opts->dev->ffs_data;
 	if (!ffs_opts->no_configfs)
 		ffs_dev_unlock();
 	if (ret)
 		return ERR_PTR(ret);
 
-	func->ffs = ffs;
+	func->ffs = ffs_data;
 	func->conf = c;
 	func->gadget = c->cdev->gadget;
 
@@ -3389,7 +3400,8 @@ static int _ffs_func_bind(struct usb_configuration *c,
 	}
 
 	if (likely(super)) {
-		func->function.ss_descriptors = vla_ptr(vlabuf, d, ss_descs);
+		func->function.ss_descriptors = func->function.ssp_descriptors =
+			vla_ptr(vlabuf, d, ss_descs);
 		ss_len = ffs_do_descs(ffs, ffs->ss_descs_count,
 				vla_ptr(vlabuf, d, raw_descs) + fs_len + hs_len,
 				d_raw_descs__sz - fs_len - hs_len,

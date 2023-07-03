@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/delay.h>
@@ -38,7 +39,7 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 #define MIN_PREFILL_LINES      35
 #ifdef CONFIG_DRM_SDE_SPECIFIC_PANEL
-#define AOD_MODE_THRESHOLD 4096
+#define AOD_MODE_THRESHOLD 35
 #endif /* CONFIG_DRM_SDE_SPECIFIC_PANEL */
 
 enum dsi_dsc_ratio_type {
@@ -57,7 +58,7 @@ static u32 dsi_dsc_rc_buf_thresh[] = {0x0e, 0x1c, 0x2a, 0x38, 0x46, 0x54,
  * Rate control - Min QP values for each ratio type in dsi_dsc_ratio_type
  */
 static char dsi_dsc_rc_range_min_qp_1_1[][15] = {
-	{0, 0, 1, 1, 3, 3, 3, 3, 3, 3, 5, 5, 5, 7, 12},
+	{0, 0, 1, 1, 3, 3, 3, 3, 3, 3, 5, 5, 5, 7, 13},
 	{0, 4, 5, 5, 7, 7, 7, 7, 7, 7, 9, 9, 9, 11, 17},
 	{0, 4, 9, 9, 11, 11, 11, 11, 11, 11, 13, 13, 13, 15, 21},
 	{0, 4, 5, 6, 7, 7, 7, 7, 7, 7, 9, 9, 9, 11, 15},
@@ -4298,9 +4299,6 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 		panel->spec_pdata->aod_mode = 1;
 		pr_notice("%s: set AOD mode ON\n", __func__);
 	}
-
-	// Set AOD Brightness value
-	dsi_panel_set_aod_change(panel, dsi_panel_get_backlight(panel));
 #else
 	if (rc)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
